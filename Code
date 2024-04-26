@@ -1,0 +1,124 @@
+# detector data sheet: https://learn.adafruit.com/adafruit-as7341-10-channel-light-color-sensor-breakout?view=all
+# amplifier data sheet: https://learn.adafruit.com/i2s-amplifier-bff/pinouts 
+# QTPY data sheet https://learn.adafruit.com/adafruit-qt-py-2040/pinouts says that
+# audio decoding instructions: https://docs.circuitpython.org/en/latest/shared-bindings/audiobusio/index.html#audiobusio.I2SO 
+# also used for audio decoding: https://learn.adafruit.com/circuitpython-essentials/circuitpython-mp3-audio 
+# how to get double digit values to speak: https://stackoverflow.com/questions/3475251/split-a-string-by-a-delimiter-in-python
+
+#channels: 415nm (Violet), 445nm (Indigo), 480nm (Blue), 515nm (Cyan), 555nm (Green), 590nm (Yellow), 630nm (Orange), 680nm (Red), Clear, Near IR
+
+#imports
+from adafruit_as7341 import AS7341 #for the detector
+from time import sleep #detector
+import board #detector, audio
+import busio #detector #needed for this code, but is present on I2C device
+import audiocore #audio
+import audiobusio #audio
+#import digitalio #audio
+import os #audio, used to acces files
+import audiomp3 #audio
+
+#establish variables 
+i2c = busio.I2C(board.SCL1, board.SDA1) #detector, 'busio.I2C(board.SCL1, board.SDA1)' is required to use STEMMA connector
+sensor = AS7341(i2c) #detector
+print("sensor gain (not sure if needed or connected to hardware:", sensor.gain) # having difficult time establishing darkness threshold; changing gain may help this?
+
+DATA = board.A0 #audio, from pinout/datasheet
+LRCLK = board.A1 #audio, same as above
+BCLK = board.A2 #audio, same as above
+audio = audiobusio.I2SOut(BCLK, LRCLK, DATA) #audio, from audio decoding link
+
+#-------SEE MAIN LOOP AT THE BOTTOM!
+
+#-------DETECTOR
+
+sensor.led_current = 1 #LED strength
+sensor.led = False #LED is on/off
+
+#determine if lid is open or closed
+def open_or_closed():
+    reading = sensor.all_channels #
+    print("reading:", reading)
+    average_reading = sum(reading) / len(reading) #convert the reading from a list to single value
+    print("average_brightness:", average_reading)
+    if average_reading < 200: #darkness threshold determined via trial and error
+        print("closed")
+        return True # must return T/F so that the closed box can be refrenced later in code
+    else:
+        print("open")
+        return False
+    
+#gather a detector value for a given chanel; calibration will later account for full light spectrum
+def gather_channel590nm_sensor_data(): #590nm is yellow. this is arbitrary and a current substitute for a calibrated model
+    sensor.led = True #turn on LED
+    sleep(0.5) #wait 0.5 seconds
+    sensor_value = sensor.channel_590nm # need to get absorbance vaue at all wavelengths #590 = fnz for "five nine zero"
+    print("590nm value:", sensor_value)
+    sensor.led = False #turn off LED
+    return sensor_value
+
+#-------CONVERT TO PH
+
+def convert_to_ph(sensor_value):
+    mini_590nm_value = sensor_value/150 #values have been ~10-800, so dividing by 1700 gets to a relative pH range
+    print("mini_590nm_value:", mini_590nm_value)
+    restricted_mini_590nm_value = sorted([0, mini_590nm_value, 14])[1] #prevents a value below 0 or above 14
+    print("restricted_mini_590nm_value:", restricted_mini_590nm_value)
+    ph_value = round(restricted_mini_590nm_value, 1) #rounds value to 1 decimal
+    print ("ph_value:", ph_value)
+    ph_sig_figs = f"{ph_value:.1f}" # fancy f-string format for circuitpython; creates exactly one decimal of accuracy for each measurement
+    print("ph_sig_figs:", ph_sig_figs)
+    return ph_sig_figs
+
+#-------OUTPUT
+
+#audio library
+audio_library =[] #create array of audio files
+for file in sorted(os.listdir("/audio")): #"os.listdir gets a list of all the files within the "/audio" directory
+    file = file.lower() #make files lower case to not confuse computer
+    if file.endswith(".mp3") and not file.startswith("."): #grabs .wav files, but not .wav files that begin with "." because that is used for bts organization
+        audio_library.append("/audio/" + file) # adds file to end of /audio
+print("audio files:", audio_library) #show audio files to check
+
+#convert mp3 files to wav; my code 2 code did not work for this becuase it assumed wav file.
+mp3 = open(audio_library[0], "rb") #instruction from audio decoding webpages
+decoder = audiomp3.MP3Decoder(mp3) #same as above
+
+#open wav audio files
+#def open_wav_file(file): 
+#    f = open(file, "rb") 
+#    w = audiocore.WaveFile(f)
+#    return f, w
+
+#find audio file for a ph value ; make the ph value an array of files
+def give_ph_value_audio(ph_value):
+    split_ph_value = str(ph_value) #converts output value into a string of distinct terms
+    print("split_ph_value:", split_ph_value)
+    split_ph_array = ph_string.split(".") # in the string, split into two at the decimal point
+    print("split_ph_array:", split_ph_array) # create the array
+    split_ph_array.insert(1, "P") #insert "P" for the decimle point audio file
+    print("split_ph_array:", split_ph_array)
+    ph_audio = ["/audio/" + x + ".mp3" for x in split_ph_array] #how to get/assemble pH audio file(s)
+    return ph_audio
+     
+#play ph in speaker
+def play_ph(ph_value):
+    files = give_ph_value_audio(ph_value) #call give_ph_value_audio function upon the ph_values 
+    for file in files:
+        decoder.file = open(file, "rb") #use decoder to open a file
+        audio.play(decoder) #use decoder to play the file
+        while audio.playing: #prevents code from playing two audios at once
+            pass
+
+ #--------MAIN LOOP
+
+while True: 
+    sleep (5) #wait 5 seconds then repeat
+    if open_or_closed(): #if sensor is in the dark
+        nm_value = gather_channel415nm_sensor_data() #gather the detector reading from 590nm channel
+        ph_value = convert_to_ph(nm_value) #use 590nm value to calclulate a ph value
+        play_ph(ph_value) #use ph_value to play corresponding audio
+        (ph_value) #why?
+        #loop will repeat
+        
+# TO DO: create a function that says "on", to be used when first turned on and every 5 minutes
