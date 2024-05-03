@@ -1,1 +1,0 @@
-Thanks for checking out my project! Here you will find the digital files and resources associated with my work on simple and accessible pH instrumentation. A written manuscript of my research is coming soon, as well and updates and improvements to my code. # pH-Box-Spring-2024
